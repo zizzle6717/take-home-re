@@ -2,6 +2,7 @@ import express, { Request, Response, NextFunction } from 'express';
 import { ZodError } from 'zod';
 import { renewalRiskRouter } from './api/renewalRisk';
 import { renewalEventsRouter } from './api/renewalEvents';
+import { adminWebhooksRouter } from './api/adminWebhooks';
 import { mockRmsRouter } from './webhooks/mockRms';
 import { config } from './config';
 
@@ -35,6 +36,7 @@ export const createApp = (_opts: CreateAppOptions = {}): express.Express => {
 
   app.use('/api/v1', renewalRiskRouter);
   app.use('/api/v1', renewalEventsRouter);
+  app.use('/api/v1', adminWebhooksRouter);
 
   if (config.NODE_ENV !== 'production') {
     app.use('/__mock_rms', mockRmsRouter);
