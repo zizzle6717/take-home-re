@@ -10,7 +10,9 @@
     "start": "node dist/index.js",
     "migrate": "knex --knexfile knexfile.ts migrate:latest",
     "migrate:rollback": "knex --knexfile knexfile.ts migrate:rollback",
-    "seed": "knex --knexfile knexfile.ts seed:run"
+    "seed": "knex --knexfile knexfile.ts seed:run",
+    "test": "vitest run",
+    "test:watch": "vitest"
   },
   "dependencies": {
     "dotenv": "^16.4.5",
@@ -25,8 +27,11 @@
     "@types/node": "^20.14.10",
     "@types/node-fetch": "^2.6.11",
     "@types/pg": "^8.11.10",
+    "@types/supertest": "^6.0.3",
+    "supertest": "^7.2.2",
     "ts-node": "^10.9.2",
     "ts-node-dev": "^2.0.0",
-    "typescript": "^5.5.4"
+    "typescript": "^5.5.4",
+    "vitest": "^2.1.9"
   }
 }
