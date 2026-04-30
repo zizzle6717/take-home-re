@@ -24,7 +24,7 @@ const insertEvent = async (eventIdSuffix: string, propertyId: string, residentId
       property_id: propertyId,
       resident_id: residentId,
       event_type: 'renewal_risk_flagged',
-      payload: JSON.stringify({ event: 'renewal_risk_flagged', eventId: `evt_test_${eventIdSuffix}` }),
+      payload: JSON.stringify({ event: 'renewal.risk_flagged', eventId: `evt_test_${eventIdSuffix}` }),
     })
     .returning<{ id: string }[]>(['id']);
   return id;

@@ -88,7 +88,7 @@ describe('enqueueRenewalEvent (integration)', () => {
     expect(ev?.resident_id).toBe(residentId);
     expect(ev?.event_type).toBe('renewal_risk_flagged');
     expect(ev?.payload).toMatchObject({
-      event: 'renewal_risk_flagged',
+      event: 'renewal.risk_flagged',
       eventId: result.eventId,
       propertyId,
       residentId,

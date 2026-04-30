@@ -27,7 +27,7 @@ const buildPayload = (
   residentId: string,
   score: ScoreRow,
 ): Record<string, unknown> => ({
-  event: 'renewal_risk_flagged',
+  event: 'renewal.risk_flagged',
   eventId,
   timestamp: new Date().toISOString(),
   propertyId,

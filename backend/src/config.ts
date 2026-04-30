@@ -7,7 +7,7 @@ const ConfigSchema = z.object({
   NODE_ENV: z.enum(['development', 'test', 'production']).default('development'),
   RMS_WEBHOOK_URL: z.string().url().default('http://localhost:3000/__mock_rms/webhook'),
   WORKER_POLL_MS: z.coerce.number().int().positive().default(1000),
-  WEBHOOK_MAX_ATTEMPTS: z.coerce.number().int().positive().default(5),
+  WEBHOOK_MAX_ATTEMPTS: z.coerce.number().int().positive().default(6),
   MOCK_RMS_FAILURE_RATE: z.coerce.number().min(0).max(1).default(0),
 });
 

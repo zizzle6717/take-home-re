@@ -19,7 +19,7 @@ describe('WebhookWorker (integration)', () => {
         property_id: propertyId,
         resident_id: residentId,
         event_type: 'renewal_risk_flagged',
-        payload: JSON.stringify({ event: 'renewal_risk_flagged', eventId: `evt_${eventIdSuffix}` }),
+        payload: JSON.stringify({ event: 'renewal.risk_flagged', eventId: `evt_${eventIdSuffix}` }),
       })
       .returning<{ id: string }[]>(['id']);
     const [ds] = await db('webhook_delivery_state')
@@ -27,7 +27,7 @@ describe('WebhookWorker (integration)', () => {
         webhook_event_id: ev!.id,
         status: 'pending',
         attempt_count: 0,
-        max_attempts: 5,
+        max_attempts: 6,
         next_retry_at: db.fn.now(),
       })
       .returning<{ id: string }[]>(['id']);
@@ -111,7 +111,7 @@ describe('WebhookWorker (integration)', () => {
       deliver: async (): Promise<DeliveryOutcome> => ({ outcome: 'failed', statusCode: 500, errorMessage: 'bad' }),
     });
 
-    for (let i = 0; i < 5; i++) {
+    for (let i = 0; i < 6; i++) {
       // Force the row to be due immediately each iteration so tick() can claim it.
       await db('webhook_delivery_state').where({ id: deliveryStateId }).update({ next_retry_at: db.fn.now() });
       await worker.tick();
@@ -121,7 +121,7 @@ describe('WebhookWorker (integration)', () => {
       .where({ id: deliveryStateId })
       .first<{ status: string; attempt_count: number }>();
     expect(row?.status).toBe('dlq');
-    expect(row?.attempt_count).toBe(5);
+    expect(row?.attempt_count).toBe(6);
   });
 
   it('FOR UPDATE SKIP LOCKED: a held lock on one row makes tick claim only the other', async () => {
