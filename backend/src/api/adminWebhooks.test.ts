@@ -166,7 +166,16 @@ describe('admin webhooks API (integration)', () => {
       const res = await request(app)
         .post('/api/v1/admin/webhooks/00000000-0000-0000-0000-000000000000/retry')
         .expect(404);
-      expect(res.body.error).toBeDefined();
+      expect(res.body.error.code).toBe('delivery_state_not_found');
+      expect(res.body.error.message).toContain('not found');
+    });
+
+    it('returns 400 invalid_uuid when the path id is not a UUID', async () => {
+      const res = await request(app)
+        .post('/api/v1/admin/webhooks/not-a-uuid/retry')
+        .expect(400);
+      expect(res.body.error.code).toBe('invalid_uuid');
+      expect(res.body.error.message).toContain('UUID');
     });
 
     it('returns 409 when the row is not in dlq status', async () => {
