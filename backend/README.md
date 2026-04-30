@@ -42,7 +42,7 @@ npm start                # node dist/index.js
 npm run migrate          # knex migrate:latest
 npm run migrate:rollback # knex migrate:rollback (one batch)
 npm run seed             # knex seed:run (Park Meadows)
-npm test                 # vitest run (62 tests)
+npm test                 # vitest run (63 tests)
 npm run test:watch       # vitest in watch mode
 ```
 

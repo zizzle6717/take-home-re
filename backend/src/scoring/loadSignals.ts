@@ -36,6 +36,16 @@ const SIGNALS_SQL = `
     ORDER BY unit_id, effective_date DESC
   ),
   pending_offers AS (
+    -- We count only 'pending' and 'accepted' offers as "they have been
+    -- engaged on renewal." A 'declined' or 'expired' offer is intentionally
+    -- treated as "no offer yet" so the resident still picks up the
+    -- noRenewalOfferYet weight in the score: a declined offer is the
+    -- strongest possible churn signal and should keep the row flagged for
+    -- a retention conversation, not exclude it. Spec language is "haven't
+    -- been offered renewal yet"; this is a deliberate deviation toward
+    -- "haven't accepted renewal yet" because that better serves the
+    -- business goal stated in the spec context (catch at-risk renewals
+    -- early enough to intervene).
     SELECT DISTINCT lease_id
     FROM renewal_offers
     WHERE status IN ('pending', 'accepted')

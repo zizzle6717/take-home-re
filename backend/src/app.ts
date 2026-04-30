@@ -30,6 +30,23 @@ export const createApp = (_opts: CreateAppOptions = {}): express.Express => {
   const app = express();
   app.use(express.json());
 
+  // Dev-only permissive CORS. The take-home runs the API on :3000 and the
+  // Vite dev server on :5173, so a same-origin assumption breaks as soon as
+  // an evaluator runs the frontend on a non-localhost host. Production would
+  // mount a real per-origin allowlist; here we just unblock the dashboard.
+  if (config.NODE_ENV !== 'production') {
+    app.use((req: Request, res: Response, next: NextFunction) => {
+      res.header('Access-Control-Allow-Origin', req.header('Origin') ?? '*');
+      res.header('Access-Control-Allow-Methods', 'GET,POST,OPTIONS');
+      res.header('Access-Control-Allow-Headers', 'Content-Type, Idempotency-Key');
+      if (req.method === 'OPTIONS') {
+        res.sendStatus(204);
+        return;
+      }
+      next();
+    });
+  }
+
   app.get('/healthz', (_req: Request, res: Response) => {
     res.json({ status: 'ok' });
   });

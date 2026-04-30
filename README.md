@@ -17,7 +17,7 @@ cp ../.env.example .env
 npm install
 npm run migrate                       # apply all migrations
 npm run seed                          # load Park Meadows seed
-npm test                              # full vitest suite (62 tests)
+npm test                              # full vitest suite (63 tests)
 npm run dev                           # logs "Database connected" + "Server on :3000"
 
 # 3. Verify the backend
@@ -94,6 +94,10 @@ Single Postgres database is the durable substrate. The API writes risk runs and 
 - **Worker crash mid-delivery.** Rows claimed during a failed tick stay in `in_flight`. Known gap: there is no sweeper to mark stuck `in_flight` rows back to `pending`. In production this would be a periodic job (see Production Hardening). For the take-home, a SIGTERM during retries drains in-flight ticks gracefully — the exit waits for the current tick to finish — but a hard crash (SIGKILL, OOM) leaves rows visible only to admin tooling.
 - **Graceful shutdown.** `SIGTERM`/`SIGINT` triggers `worker.stop()` (clears the interval, awaits the in-flight tick) then `server.close()`, so the process exits cleanly within roughly the worker's poll period.
 
+## Seed scope
+
+The Park Meadows seed (`backend/seeds/01_park_meadows.ts`) intentionally produces **4 residents** matching the four named scenarios in `seed_and_testing.md` (Jane / John / Alice / Bob). The illustrative response example in that doc shows `totalResidents: 15, flaggedCount: 8` — those are the spec author's expected numbers for a fully-fleshed-out seed, not the numbers the bundled seed produces. Integration tests pin the actual counts (`expect(totalResidents).toBe(4)`); a future expansion of the seed should also update those assertions.
+
 ## Production Hardening (not implemented)
 
 These were called out in the spec as out of scope for the take-home; documenting the intent here.
@@ -123,7 +127,7 @@ Every commit was reviewed before being made; the plan's Phase verifications run 
 
 ```bash
 cd backend
-npm test                # 62 tests across 12 files
+npm test                # 63 tests across 12 files
 npm run test:watch      # for TDD loops
 ```
 
