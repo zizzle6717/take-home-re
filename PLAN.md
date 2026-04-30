@@ -9,7 +9,7 @@ This file is the source of truth for building the renewal risk system. It is str
 Execute these steps at the start of every session:
 
 1. Read this file fully.
-2. On the first session only, also read `renewal_risk_takehome.md` and `seed_and_testing.md` in the repo root. These are the original spec; this plan derives from them.
+2. On the first session only, also read `renewal_risk_takehome.md`, `seed_and_testing.md`, and `starter_schema.sql` in the repo root. These are the original spec; this plan derives from them. Note that `starter_schema.sql` splits the schema into a "provided" half (lines 1–138, do not modify the column shape) and a "candidate-designed" half (lines 141+, our risk + webhook tables).
 3. Run `git log --oneline` to determine the last completed phase. Phase commits use the exact format `Phase N: <description>`.
 4. Identify the current phase as the lowest-numbered phase whose commit is not present.
 5. Run that phase's **Preconditions** checks. If any fail, repair before building (do not skip).
@@ -50,6 +50,7 @@ Do not relitigate these. They are chosen and final.
 - **Webhook signing:** Not implemented. HMAC-SHA256 scheme documented in README only.
 - **Node version:** 20 LTS.
 - **Backend test framework:** Vitest. Tests live alongside source as `*.test.ts`.
+- **Core ROP schema fidelity:** The 8 tables defined above the divider in `starter_schema.sql` (`properties`, `unit_types`, `units`, `unit_pricing`, `residents`, `leases`, `resident_ledger`, `renewal_offers`) must match the provided DDL in column set, types/lengths, defaults, unique constraints, and `idx_*` indexes. Deviations are allowed only where Knex idiom forces them (e.g., `gen_random_uuid()` via `pgcrypto` instead of `uuid_generate_v4()` via `uuid-ossp` is fine — both produce v4 UUIDs and the spec doesn't depend on the generator). The risk + webhook tables below the divider are candidate-designed.
 
 ---
 
@@ -245,6 +246,66 @@ All tables exist with intentional indexes. The provided seed script creates 4 do
 ### Commit
 ```
 Phase 1: database schema + seed
+```
+
+---
+
+## Phase 1.5: Starter Schema Alignment
+
+### Preconditions
+- `git log --oneline` shows `Phase 1:` but no `Phase 1.5:`.
+- Phase 1 verifications still pass.
+
+### Goal
+Bring the 8 core ROP tables into structural compliance with `starter_schema.sql`. Phase 1 was written from `renewal_risk_takehome.md` + `seed_and_testing.md` alone and predates close inspection of the starter DDL; this phase closes the gap with a forward-only alignment migration rather than rewriting `001_core_entities.ts` (already committed and seeded against).
+
+### Tasks
+
+1. Create migration `migrations/005_starter_schema_alignment.ts`. Forward-only `up` adds missing columns, defaults, unique constraints, and indexes; `down` reverses them.
+
+   Columns to add:
+   - `properties`: `updated_at timestamptz default now()`
+   - `units`: `updated_at timestamptz default now()`
+   - `residents`: `phone text`, `move_in_date date`, `move_out_date date`, `created_at timestamptz default now()`, `updated_at timestamptz default now()`
+   - `leases`: `created_at timestamptz default now()`, `updated_at timestamptz default now()`
+   - `renewal_offers`: `offer_expiration_date date`, `updated_at timestamptz default now()`
+
+   Defaults to add (status columns):
+   - `properties.status` default `'active'`
+   - `units.status` default `'available'`
+   - `residents.status` default `'active'`
+   - `leases.status` default `'active'`, `leases.lease_type` default `'fixed'`
+   - `renewal_offers.status` default `'pending'`
+
+   Unique constraints to add (verified compliant against current seed data):
+   - `properties UNIQUE (name)`
+   - `unit_types UNIQUE (property_id, name)`
+   - `unit_pricing UNIQUE (unit_id, effective_date)`
+
+   Indexes from starter_schema to add (do not duplicate Phase 1's partial/composite indexes in `004_indexes.ts`; both can coexist — starter's are simple single-column indexes that serve different access patterns):
+   - `idx_properties_status` on `properties(status)`
+   - `idx_units_property_id`, `idx_units_status`
+   - `idx_unit_pricing_unit_id`, `idx_unit_pricing_effective_date`
+   - `idx_residents_property_id`, `idx_residents_unit_id`, `idx_residents_status`
+   - `idx_leases_property_id`, `idx_leases_resident_id`, `idx_leases_lease_end_date`, `idx_leases_status`
+   - `idx_resident_ledger_property_id`, `idx_resident_ledger_resident_id`, `idx_resident_ledger_transaction_date`, `idx_resident_ledger_transaction_type`
+   - `idx_renewal_offers_property_id`, `idx_renewal_offers_resident_id`, `idx_renewal_offers_status`
+
+2. Update `src/db/migrations.test.ts` to assert the new columns, defaults, unique constraints, and `idx_*` indexes are present (extend existing assertions, don't replace).
+
+### Verification
+
+- `npm run migrate` completes; `npm run migrate:rollback` cleanly reverses Phase 1.5 (does not touch 001).
+- `psql $DATABASE_URL -c "\d residents"` shows `phone`, `move_in_date`, `move_out_date`, `created_at`, `updated_at`.
+- `psql $DATABASE_URL -c "\d properties"` shows `status` defaulting to `'active'` and `UNIQUE(name)`.
+- `psql $DATABASE_URL -c "\di idx_*"` shows all starter indexes listed above.
+- Re-run seed: `npm run seed` completes (truncates + reinserts; no constraint violations).
+- All Phase 1 verifications still pass (4 residents, 1 MTM lease, 5 ledger rows for John Smith, 1 renewal offer).
+- `cd backend && npm test` — full suite green.
+
+### Commit
+```
+Phase 1.5: align core schema with starter_schema.sql
 ```
 
 ---
