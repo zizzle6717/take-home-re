@@ -49,6 +49,32 @@ Do not relitigate these. They are chosen and final.
 - **Auth:** None. Documented as out of scope.
 - **Webhook signing:** Not implemented. HMAC-SHA256 scheme documented in README only.
 - **Node version:** 20 LTS.
+- **Backend test framework:** Vitest. Tests live alongside source as `*.test.ts`.
+
+---
+
+## Testing Approach
+
+This project is built test-first. The discipline:
+
+1. **Write the test before the code.** For any new pure function or HTTP handler, the test file is created and committed in the same change as the implementation, with the test written first and observed to fail before the implementation is written.
+
+2. **Test categories:**
+   - **Unit (pure logic):** Scoring math, event-id derivation, backoff math, payload shaping. No I/O. Fast. Required before writing the function under test.
+   - **Integration (DB-backed):** Migrations, seed correctness, signal-loader query, webhook-state transitions, admin endpoints. These hit the real dev Postgres. Each test (or its `beforeEach`) is responsible for leaving the DB in a known state — either by running inside a transaction that rolls back, or by truncating the tables it touches.
+   - **HTTP handler:** Boot the Express app in-process and call it via `supertest` (or `fetch` against `app.listen(0)`). Cover the happy path, one validation failure, and one not-found case per endpoint.
+
+3. **Where tests live:**
+   - `src/scoring/calculateScore.test.ts` next to `calculateScore.ts`.
+   - `src/scoring/loadSignals.test.ts` next to the SQL loader (integration).
+   - `src/webhooks/eventId.test.ts`, `src/webhooks/worker.test.ts` (integration), etc.
+   - `src/api/<route>.test.ts` for handler tests.
+
+4. **Run command:** `npm test` runs the full Vitest suite. `npm run test:watch` for TDD loops. The dev database must be running (`npm run docker:dev:up` from repo root) for integration tests to pass.
+
+5. **Phase verification.** Every phase's Verification block requires `cd backend && npm test` to pass. A phase is not complete until its tests are green, even if the manual `curl` checks succeed.
+
+6. **What not to test.** Don't test framework behavior (Express routing, Knex internals). Don't write tests for trivial getters or DTO mapping that has no branching. The goal is to lock in *behavior the spec requires*, not coverage for its own sake.
 
 ---
 
@@ -118,9 +144,11 @@ A working scaffold: `docker-compose up postgres` brings up a healthy database, b
 4. Scaffold backend:
    - `cd backend && npm init -y`
    - Install deps: `express`, `knex`, `pg`, `dotenv`, `zod`, `node-fetch@2` (CommonJS friendly).
-   - Install dev deps: `typescript`, `ts-node-dev`, `@types/node`, `@types/express`, `@types/pg`, `@types/node-fetch`.
+   - Install dev deps: `typescript`, `ts-node-dev`, `@types/node`, `@types/express`, `@types/pg`, `@types/node-fetch`, `vitest`, `supertest`, `@types/supertest`.
    - Create `tsconfig.json` with strict mode on, target ES2022, module commonjs, outDir `dist`, rootDir `src`.
-   - Add scripts to `package.json`: `dev` (ts-node-dev), `build` (tsc), `start` (node dist/index.js), `migrate` (knex migrate:latest), `migrate:rollback`, `seed` (knex seed:run).
+   - Add scripts to `package.json`: `dev` (ts-node-dev), `build` (tsc), `start` (node dist/index.js), `migrate` (knex migrate:latest), `migrate:rollback`, `seed` (knex seed:run), `test` (vitest run), `test:watch` (vitest).
+   - Create `vitest.config.ts` (or inline `vitest` block in `package.json`) configuring a 30s test timeout for integration tests and `setupFiles` that loads `dotenv`.
+   - Write a single placeholder test `src/__tests__/smoke.test.ts` asserting `1 + 1 === 2` so `npm test` exits green. This is purely to validate the harness; replace with real tests in subsequent phases.
    - Create `knexfile.ts` reading `DATABASE_URL`, with TypeScript migrations directory `./migrations` and seeds directory `./seeds`.
    - Create `src/db/index.ts` exporting a configured Knex instance.
    - Create `src/index.ts`: load dotenv, create Express app, add `GET /healthz` returning `{status: 'ok'}`, verify DB connection on boot via `db.raw('select 1')`, listen on `PORT`. Log "Database connected" and "Server on :PORT".
@@ -141,6 +169,7 @@ Run each and confirm output:
 - `docker-compose ps` → `postgres` shows healthy.
 - `cd backend && cp ../.env.example .env && npm install && npm run dev` → logs "Database connected" and "Server on :3000".
 - `curl http://localhost:3000/healthz` → returns `{"status":"ok"}`.
+- `cd backend && npm test` → smoke test passes; Vitest harness is wired up.
 - `cd frontend && npm install && npm run dev` → starts Vite on 5173, default page loads.
 - `cd backend && npm run build` → produces `dist/index.js` with no errors.
 - `docker build -t renewal-backend ./backend` → builds successfully.
@@ -197,6 +226,10 @@ All tables exist with intentional indexes. The provided seed script creates 4 do
 
 5. Create `seeds/01_park_meadows.ts`. Translate the SQL CTE script in `seed_and_testing.md` into a Knex seed using a single `db.raw(...)` call wrapped in a transaction. Adapt column names if the spec's seed assumes columns we didn't create (verify against migrations 001).
 
+6. **Tests (write before considering the phase done):**
+   - `src/db/migrations.test.ts`: in a `beforeAll`, run `db.migrate.latest()` (idempotent if already migrated). Assert all 10 expected tables exist by querying `information_schema.tables`. Assert at least one of the partial indexes from migration 004 exists in `pg_indexes`.
+   - `src/db/seed.test.ts`: run the seed (after truncating relevant tables in `beforeAll` to keep idempotent), then assert the seed counts: 4 residents, 1 month_to_month lease, 5 ledger rows for John Smith, 1 renewal offer for Alice. These mirror the `psql` checks below but live in the suite so they run on every change.
+
 ### Verification
 
 - `cd backend && npm run migrate` → completes with no errors.
@@ -207,6 +240,7 @@ All tables exist with intentional indexes. The provided seed script creates 4 do
 - `psql $DATABASE_URL -c "select count(*) from leases where lease_type = 'month_to_month'"` → returns 1.
 - `psql $DATABASE_URL -c "select count(*) from resident_ledger where resident_id in (select id from residents where last_name = 'Smith')"` → returns 5 (John Smith has one missing payment).
 - `psql $DATABASE_URL -c "select count(*) from renewal_offers"` → returns 1 (Alice's offer).
+- `cd backend && npm test` → all migration + seed assertions pass.
 
 ### Commit
 ```
@@ -226,9 +260,19 @@ Phase 1: database schema + seed
 
 ### Tasks
 
-1. Create `src/scoring/types.ts` defining `Signals`, `ScoreResult`, `ResidentSignals` interfaces.
+1. Create `src/scoring/types.ts` defining `Signals`, `ScoreResult`, `ResidentSignals` interfaces. (Type-only file; no test needed.)
 
-2. Create `src/scoring/calculateScore.ts` — a pure function. Given a `Signals` object, returns `{ score, tier }`.
+2. **Test-first.** Create `src/scoring/calculateScore.test.ts` with the assertions below. Run `npm test` and confirm the suite fails with "function not found" or equivalent before writing the implementation.
+
+   Required cases:
+   - Jane Doe inputs (45 days, not delinquent, no offer, $1400 vs $1600) → score in [80, 90], tier 'high'.
+   - Alice inputs (180 days, not delinquent, has offer, $1600 vs $1600) → score in [0, 30], tier 'low'.
+   - Bob inputs (MTM treated as 30 days, not delinquent, no offer, $1450 vs $1600) → score in [55, 75], tier 'medium' or 'high'.
+   - Boundary: 0 days to expiry → daysScore = 100. 90+ days → daysScore = 0.
+   - `market_rent` null → that signal is dropped and the remaining three are renormalized; verify a known input still returns the expected tier.
+   - Tier boundaries: score 69 → 'medium', 70 → 'high', 39 → 'low', 40 → 'medium'.
+
+3. Create `src/scoring/calculateScore.ts` — pure function. Given a `Signals` object, returns `{ score, tier }`.
 
    Weights:
    - Days to expiry (40%): score is `min(100, max(0, (90 - days_to_expiry) / 90 * 100))` for fixed-term leases; for month-to-month, treat days_to_expiry as 30. Beyond 90 days = 0; at 0 days = 100.
@@ -242,12 +286,11 @@ Phase 1: database schema + seed
 
    If `market_rent` is null or unavailable: drop that signal and renormalize the other three to weights 0.47 / 0.29 / 0.24 (proportional to original 40/25/20). Document this in code comments.
 
-   Write a small test file `src/scoring/calculateScore.test.ts` (or just a `.assertions.ts` file run on boot in dev) that asserts:
-   - Jane Doe inputs (45 days, not delinquent, no offer, $1400 vs $1600) → score in [80, 90], tier 'high'.
-   - Alice inputs (180 days, not delinquent, has offer, $1600 vs $1600) → score in [0, 30], tier 'low'.
-   - Bob inputs (MTM treated as 30 days, not delinquent, no offer, $1450 vs $1600) → score in [55, 75], tier 'medium' or 'high'.
+   Iterate until all assertions in step 2 pass.
 
-3. Create `src/scoring/loadSignals.ts` — single SQL query via `db.raw`. Skeleton:
+4. **Test-first for the loader.** Create `src/scoring/loadSignals.test.ts`. With the seeded DB (run `npm run seed` in `beforeAll`), assert that calling `loadSignals(seededPropertyId, asOfDate)` returns 4 rows including the expected `days_to_expiry`, `has_pending_offer`, and `payment_count` for each known seed resident. Run and confirm it fails before writing the loader.
+
+5. Create `src/scoring/loadSignals.ts` — single SQL query via `db.raw`. Skeleton:
 
    ```sql
    WITH active_leases AS (
@@ -297,7 +340,16 @@ Phase 1: database schema + seed
 
    The handler maps this into `Signals` objects. Treat `payment_count < 6` as delinquent.
 
-4. Create `src/api/renewalRisk.ts` with two handlers:
+6. **Test-first for the handlers.** Create `src/api/renewalRisk.test.ts`. Boot the Express app in-process and use `supertest`. Cover:
+   - POST happy path: returns 200, response contains Jane Doe in `flags` with tier `high`, Alice not in flags (low), `riskTiers` counts add up to `flaggedCount` (high + medium).
+   - POST idempotency: calling twice with the same `asOfDate` returns the same `calculatedAt` and does not insert a second `risk_calculation_runs` row (assert via `db('risk_calculation_runs').count`).
+   - POST validation: missing `asOfDate` → 400 with `error.code` populated.
+   - GET happy path: returns the same shape as the most-recent POST.
+   - GET 404: unknown propertyId returns 404.
+
+   Run and confirm failures before writing the handlers.
+
+7. Create `src/api/renewalRisk.ts` with two handlers:
 
    - `POST /api/v1/properties/:propertyId/renewal-risk/calculate`:
      - Validate body with Zod: `{ propertyId: string, asOfDate: string (ISO date) }`. Verify body `propertyId` matches URL param.
@@ -312,7 +364,7 @@ Phase 1: database schema + seed
      - Return the most recent `risk_calculation_runs` row for the property, with associated `risk_scores`, in the same response shape as POST.
      - 404 if no run exists.
 
-5. Wire routes into `src/index.ts`. Add a JSON body parser. Add a generic error handler returning `{ error: { message, code } }` with appropriate status codes.
+8. Wire routes into `src/index.ts`. Add a JSON body parser. Add a generic error handler returning `{ error: { message, code } }` with appropriate status codes.
 
 ### Verification
 
@@ -324,7 +376,7 @@ Phase 1: database schema + seed
 - Response includes Bob Williams with `riskTier: "medium"` or `"high"`.
 - Calling the POST twice with the same `asOfDate` does not create a second `risk_calculation_runs` row (verify via `psql`).
 - `curl http://localhost:3000/api/v1/properties/<PROP_ID>/renewal-risk` returns the same flags.
-- The score test assertions in `calculateScore.test.ts` pass.
+- `cd backend && npm test` → all scoring, loader, and handler tests pass.
 
 ### Commit
 ```
@@ -344,21 +396,35 @@ Clicking "Trigger Renewal Event" (simulated via curl for now) creates a webhook 
 
 ### Tasks
 
-1. Create `src/webhooks/eventId.ts` — exports `computeEventId(propertyId, residentId, runId): string` returning `sha256(propertyId + ':' + residentId + ':' + runId)` hex-encoded with `evt_` prefix. Deterministic = idempotent.
+1. **Test-first.** Create `src/webhooks/eventId.test.ts` with three assertions: (a) same inputs → same output, (b) different inputs (varying any of property/resident/run) → different output, (c) output starts with `evt_` and is hex. Confirm fails before implementing.
 
-2. Create `src/webhooks/enqueue.ts` — `enqueueRenewalEvent(propertyId, residentId, runId): Promise<{ eventId, alreadyExists }>`:
+2. Create `src/webhooks/eventId.ts` — exports `computeEventId(propertyId, residentId, runId): string` returning `sha256(propertyId + ':' + residentId + ':' + runId)` hex-encoded with `evt_` prefix. Deterministic = idempotent.
+
+3. **Test-first.** Create `src/webhooks/enqueue.test.ts` (integration). Cases: (a) first call returns `alreadyExists: false` and inserts one row in each of `webhook_events` and `webhook_delivery_state`, (b) second call with same args returns `alreadyExists: true` and inserts no new rows, (c) unknown resident → throws. Confirm failures, then implement.
+
+4. Create `src/webhooks/enqueue.ts` — `enqueueRenewalEvent(propertyId, residentId, runId): Promise<{ eventId, alreadyExists }>`:
    - Look up the resident's latest risk score within `runId`. Throw 404 if not found.
    - Build the spec-shaped payload (event, eventId, timestamp, propertyId, residentId, data: { riskScore, riskTier, daysToExpiry, signals }).
    - In a single transaction: `INSERT INTO webhook_events (...) ON CONFLICT (event_id) DO NOTHING RETURNING id`. If no row returned, the event already existed; fetch its id and return `alreadyExists: true`. Otherwise insert a `webhook_delivery_state` row with `status='pending'`, `attempt_count=0`, `next_retry_at=now()`.
 
-3. Create `src/webhooks/deliver.ts` — `attemptDelivery(state): Promise<DeliveryOutcome>`:
+5. Create `src/webhooks/deliver.ts` — `attemptDelivery(state): Promise<DeliveryOutcome>`:
    - Load the `webhook_events.payload`.
    - POST to `RMS_WEBHOOK_URL` with headers `Content-Type: application/json` and `Idempotency-Key: <eventId>`. Use a 5-second timeout.
    - On 2xx: return `{ outcome: 'delivered', statusCode }`.
    - On non-2xx or thrown error: return `{ outcome: 'failed', statusCode, errorMessage }`.
    - Always log structured: `{ eventId, attempt, statusCode, latencyMs, outcome }`.
 
-4. Create `src/webhooks/worker.ts` — `WebhookWorker` class with `start()`, `stop()`:
+6. **Test-first for backoff math.** Extract the backoff calculation into a pure helper `computeNextRetryDelaySeconds(attemptCount): number`. Test it directly: 1→1, 2→2, 3→4, 4→8, 5→16. Implement after.
+
+7. **Test-first for the worker state machine.** Create `src/webhooks/worker.test.ts` (integration). Cases:
+   - Successful delivery (use a stub deliver function or point `RMS_WEBHOOK_URL` at a local Express app spun up in the test): one tick moves the row `pending → delivered` with `attempt_count=1`.
+   - Failure path: with a deliver stub returning `failed`, a single tick increments `attempt_count`, sets `next_retry_at` correctly, and keeps status `pending`.
+   - DLQ: after `max_attempts` failures, status becomes `dlq`.
+   - `SKIP LOCKED` claim: insert two pending rows; run two `tick()` calls in parallel; assert each claims a different row (no double-processing). Easiest with two `db` instances or by holding a `FOR UPDATE` lock in a separate transaction.
+
+   Implement the worker iteratively against these tests.
+
+8. Create `src/webhooks/worker.ts` — `WebhookWorker` class with `start()`, `stop()`:
 
    - `start()` schedules `tick()` every `WORKER_POLL_MS`. Guards against overlapping ticks with an `inFlight` boolean.
    - `tick()`:
@@ -377,18 +443,20 @@ Clicking "Trigger Renewal Event" (simulated via curl for now) creates a webhook 
      4. On `failed`: increment `attempt_count`. If `attempt_count >= max_attempts`, set `status='dlq'`. Else set `status='pending'` and `next_retry_at = now() + INTERVAL '<backoff> seconds'` where backoff is `2^(attempt_count - 1)` (so 1, 2, 4, 8, 16). Set `last_error`, `last_status_code`, `last_attempt_at`.
    - `stop()` sets a `stopping` flag, clears the interval, awaits in-flight ticks to drain, returns.
 
-5. Create `src/webhooks/mockRms.ts` — Express router exposing `POST /__mock_rms/webhook`:
+9. Create `src/webhooks/mockRms.ts` — Express router exposing `POST /__mock_rms/webhook`:
    - Read `MOCK_RMS_FAILURE_RATE` (0.0–1.0). If `Math.random() < failureRate`, respond 503.
    - Otherwise log payload and respond 200 with `{ status: 'ok' }`.
    - Mount under `/__mock_rms` only when `NODE_ENV !== 'production'`.
 
-6. Create `src/api/renewalEvents.ts`:
+10. **Test-first for the renewal-event endpoint.** Create `src/api/renewalEvents.test.ts`. Cases: (a) flagged resident → 202 + `eventId`, (b) calling twice → second response has `status: 'already_exists'`, (c) no risk run for property → 404, (d) unknown resident → 404.
+
+11. Create `src/api/renewalEvents.ts`:
    - `POST /api/v1/properties/:propertyId/residents/:residentId/renewal-events`:
      - Validate path params (UUIDs).
      - Look up the latest `risk_calculation_runs.id` for the property. 404 if none.
      - Call `enqueueRenewalEvent`. Return `{ eventId, status: 'queued' | 'already_exists' }` with 202.
 
-7. Update `src/index.ts`:
+12. Update `src/index.ts`:
    - Mount routers in order: api routes, mock RMS router (dev only).
    - After DB connects, instantiate `WebhookWorker` and call `start()`.
    - Add `process.on('SIGTERM', ...)` and `process.on('SIGINT', ...)` handlers that call `worker.stop()`, then `server.close()`, then exit.
@@ -414,6 +482,8 @@ Set `RMS_WEBHOOK_URL=http://localhost:3000/__mock_rms/webhook` for these tests.
 
 - Graceful shutdown:
   - Send SIGTERM to backend during retries → process exits cleanly within ~5s, no unhandled promise rejections.
+
+- `cd backend && npm test` → all webhook unit + integration tests pass.
 
 ### Commit
 ```
@@ -469,6 +539,9 @@ Visiting `http://localhost:5173/properties/<PROP_ID>/renewal-risk` shows a table
 - Clicking "Trigger Renewal Event" → button shows "Sending..." → "Sent ✓". Mock RMS logs the delivery in the backend terminal within 2s.
 - Stopping the backend and reloading the page → red error banner with retry button. Restart backend, click retry → loads.
 - No errors in browser console.
+- `cd backend && npm test` still green (no regressions from Phase 3).
+
+> **Frontend testing note:** This phase intentionally has no Vitest setup on the frontend — the dashboard is thin presentation over the already-tested API. If you add nontrivial client-side logic (a derived computation, a sort/filter that's not just a state update), add a small `vitest`+`@testing-library/react` setup at that point and write the test first.
 
 ### Commit
 ```
@@ -503,7 +576,13 @@ Webhook health endpoint and DLQ requeue endpoint exist. README documents archite
    - If status is not `dlq`, return 409 with message "only DLQ entries can be manually retried".
    - Otherwise update: `status='pending'`, `attempt_count=0`, `next_retry_at=now()`, `last_error=null`. Return 200 with the updated row.
 
-3. Fill in `README.md`:
+3. **Test-first for both admin endpoints.** Create `src/api/adminWebhooks.test.ts`:
+   - Health: with no webhook rows, returns counts all zero, `oldestPendingAgeSeconds` null, `recentFailureRate` 0. Insert one delivered + one pending; assert counts reflect that.
+   - Retry: 404 for unknown id, 409 for a non-DLQ row, 200 + correct field updates for a DLQ row.
+
+   Confirm failures, then implement.
+
+4. Fill in `README.md`:
 
    - **Quick Start** (already from Phase 0): refine to include all commands in order.
 
@@ -545,6 +624,7 @@ Webhook health endpoint and DLQ requeue endpoint exist. README documents archite
   - `curl -X POST http://localhost:3000/api/v1/admin/webhooks/<ID>/retry` returns 200.
   - The state row's `status` is back to `pending` and `attempt_count` is 0.
 - `README.md` contains all sections listed above with non-placeholder content.
+- `cd backend && npm test` → all tests across all phases pass.
 
 ### Commit
 ```

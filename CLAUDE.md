@@ -124,7 +124,7 @@ docker build -t renewal-backend ./backend
 - Do not add dependencies casually. If a new dep is genuinely needed, surface why before adding.
 - Do not introduce ORMs (TypeORM, Prisma, Sequelize, Drizzle). Knex is the choice.
 - Do not introduce a router on the frontend. Path parsing from `window.location` is sufficient.
-- Do not write a test framework setup. The single scoring assertion file in Phase 2 is the testing scope.
+- Vitest is the backend test framework (see `PLAN.md` "Testing Approach"). New pure logic and HTTP handlers are written test-first; integration tests for DB-backed code share the dev database and clean up after themselves. Don't reach for additional frameworks (Jest, Mocha) — Vitest is the locked choice.
 - Do not edit `PLAN.md`, `renewal_risk_takehome.md`, or `seed_and_testing.md` without explicit user direction.
 - Do not refactor code from earlier phases when working on a later phase. If you spot a real bug, surface it; don't silently rewrite.
 - Do not skip verification because the code "looks right." Run the commands.

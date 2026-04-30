@@ -1,0 +1,16 @@
+{
+  "name": "renewal-risk-root",
+  "private": true,
+  "version": "0.1.0",
+  "description": "Workspace root. Holds docker compose convenience scripts. Backend and frontend have their own package.json files.",
+  "scripts": {
+    "docker:dev:up": "docker compose up -d postgres",
+    "docker:dev:down": "docker compose down",
+    "docker:dev:logs": "docker compose logs -f postgres",
+    "docker:dev:reset": "docker compose down -v && docker compose up -d postgres",
+    "docker:full:up": "docker compose --profile full up -d",
+    "docker:full:down": "docker compose --profile full down",
+    "docker:status": "docker compose ps",
+    "docker:psql": "docker exec -it renewal_risk_postgres psql -U postgres -d renewal_risk"
+  }
+}
