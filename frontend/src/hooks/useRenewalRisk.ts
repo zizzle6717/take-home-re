@@ -50,5 +50,16 @@ export const useRenewalRisk = (propertyId: string) => {
     void load();
   }, [load]);
 
-  return { ...state, refetch: load };
+  const recalculate = useCallback(async () => {
+    setState((prev) => ({ ...prev, loading: true, error: null }));
+    try {
+      const data = await calculateRenewalRisk(propertyId, today());
+      setState({ data, loading: false, error: null });
+    } catch (err) {
+      const message = err instanceof Error ? err.message : 'failed to recalculate renewal risk';
+      setState((prev) => ({ ...prev, loading: false, error: message }));
+    }
+  }, [propertyId]);
+
+  return { ...state, refetch: load, recalculate };
 };

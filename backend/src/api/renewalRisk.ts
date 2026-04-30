@@ -122,7 +122,9 @@ const loadScoresForRun = async (runId: string): Promise<ScoreRow[]> =>
       'rs.signals',
       'r.first_name',
       'r.last_name',
-      'u.id as unit_id',
+      // unitId is the human-readable unit number (e.g. "101"), not the UUID —
+      // matches the spec example shape and is what a property manager recognizes.
+      'u.unit_number as unit_id',
     );
 
 export const renewalRiskRouter = Router();

@@ -1,4 +1,4 @@
-import { Fragment, useState } from 'react';
+import { Fragment, useMemo, useState } from 'react';
 import type { Flag, FlagSignals, RiskTier } from '../api/client';
 
 // Per-row trigger state. The page passes a single async `onTrigger` and the
@@ -43,14 +43,23 @@ const buttonLabel = (status: TriggerStatus): string => {
   }
 };
 
-const shortId = (id: string): string => id.slice(0, 8);
+type SortDir = 'desc' | 'asc';
 
 export const RiskTable = ({ flags, onTrigger }: Props) => {
   const [expanded, setExpanded] = useState<Record<string, boolean>>({});
   const [statuses, setStatuses] = useState<Record<string, TriggerStatus>>({});
+  const [sortDir, setSortDir] = useState<SortDir>('desc');
+
+  const sortedFlags = useMemo(() => {
+    const copy = [...flags];
+    copy.sort((a, b) => (sortDir === 'desc' ? b.riskScore - a.riskScore : a.riskScore - b.riskScore));
+    return copy;
+  }, [flags, sortDir]);
 
   const toggle = (residentId: string) =>
     setExpanded((prev) => ({ ...prev, [residentId]: !prev[residentId] }));
+
+  const toggleSort = () => setSortDir((d) => (d === 'desc' ? 'asc' : 'desc'));
 
   const handleTrigger = async (residentId: string) => {
     setStatuses((prev) => ({ ...prev, [residentId]: 'pending' }));
@@ -70,13 +79,22 @@ export const RiskTable = ({ flags, onTrigger }: Props) => {
           <th>Resident</th>
           <th>Unit</th>
           <th>Days to Expiry</th>
-          <th>Risk Score</th>
+          <th>
+            <button
+              type="button"
+              className="risk-table__sort"
+              onClick={toggleSort}
+              aria-label={`Sort by score ${sortDir === 'desc' ? 'ascending' : 'descending'}`}
+            >
+              Risk Score {sortDir === 'desc' ? '↓' : '↑'}
+            </button>
+          </th>
           <th>Tier</th>
           <th>Action</th>
         </tr>
       </thead>
       <tbody>
-        {flags.map((flag) => {
+        {sortedFlags.map((flag) => {
           const isOpen = Boolean(expanded[flag.residentId]);
           const status = statuses[flag.residentId] ?? 'idle';
           return (
@@ -95,7 +113,7 @@ export const RiskTable = ({ flags, onTrigger }: Props) => {
                 </td>
                 <td>{flag.name}</td>
                 <td>
-                  <code className="risk-table__unit">{shortId(flag.unitId)}</code>
+                  <code className="risk-table__unit">{flag.unitId}</code>
                 </td>
                 <td>{flag.daysToExpiry}</td>
                 <td className="risk-table__score">{flag.riskScore}</td>
